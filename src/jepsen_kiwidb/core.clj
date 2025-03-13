@@ -1,6 +1,7 @@
 (ns jepsen-kiwidb.core)
 
-(defn foo
-  "I don't do a whole lot."
-  [x]
-  (println x "Hello, World!"))
+(defn -main
+  "Handles command line arguments. Can either run a test,
+  or a web server for browsing results."
+  [& args]
+  (prn "Hello, World!"))
