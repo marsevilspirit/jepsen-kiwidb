@@ -28,8 +28,8 @@
    (open node {}))
 
   ([node opts]
-   (let [spec (merge {:host node
-                      :port 9221
+   (let [spec (merge {:host node ; Like n1, n2, n3...
+                      :port 9221 ; kiwidb port
                       :timeout 10000}
                      opts)
          wcar-opts {:pool client-conn-pool, :spec spec}]
