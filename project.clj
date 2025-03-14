@@ -5,6 +5,6 @@
             :url "https://www.eclipse.org/legal/epl-2.0/"}
   :dependencies [[org.clojure/clojure "1.11.1"]
                  [jepsen "0.3.8-SNAPSHOT"]
-                 [com.taoensso/carmine "2.19.1"]]
+                 [com.taoensso/carmine "3.4.1"]]
   :repl-options {:init-ns jepsen-kiwidb.core}
   :main jepsen-kiwidb.core)
