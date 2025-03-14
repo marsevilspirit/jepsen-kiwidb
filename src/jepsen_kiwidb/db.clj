@@ -20,8 +20,8 @@
   "The remote directory where we deploy kiwi to"
   "/root")
 
-(def log-file (str dir "/kiwidb.log"))
-(def pid-file (str dir "/kiwidb.pid"))
+(def log-file (str dir "/kiwidb.log")) ; /root/kiwidb.log
+(def pid-file (str dir "/kiwidb.pid")) ; /root/kiwidb.pid
 (def binary "/root/kiwi")
 (def cli-binary "/bin/redis-cli")
 (def config-file "kiwi.conf")
@@ -146,7 +146,14 @@
     (teardown! [_ _ node]
       (log/info node "Tearing down kiwidb" kiwi-version)
       (cu/stop-daemon! pid-file)
-      (log/info "Remove kiwi" (str dir "/" "db"))
+      (log/info "Remove db:" (str dir "/" "db"))
       (c/su (c/exec :rm :-rf (str dir "/" "db")))
-      (log/info "Remove kiwi" (str dir "/" "logs"))
-      (c/su (c/exec :rm :-rf (str dir "/" "logs"))))))
+      (log/info "Remove log:" (str dir "/" "logs"))
+      (c/su (c/exec :rm :-rf (str dir "/" "logs")))
+      (log/info "Remove log-file:" log-file)
+      (c/su (c/exec :rm log-file)))
+
+    db/LogFiles
+    (log-files [_ test node]
+      (log/info (str "Log files for " node " are " log-file))
+      [log-file])))
