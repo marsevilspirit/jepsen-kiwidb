@@ -28,9 +28,9 @@
    (open node {}))
 
   ([node opts]
-   (let [spec (merge {:host       node
-                      :port       9221
-                      :timeout-ms 10000}
+   (let [spec (merge {:host node
+                      :port 9221
+                      :timeout 10000}
                      opts)
          wcar-opts {:pool client-conn-pool, :spec spec}]
      wcar-opts)))

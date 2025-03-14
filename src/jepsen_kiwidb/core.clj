@@ -8,6 +8,7 @@
             [jepsen-kiwidb
              [db :as kiwidb]
              [client :as kclient]]
+            [taoensso.carmine :as car]
             [jepsen.os.ubuntu :as ubuntu]))
 
 (defrecord Client [conn]
@@ -21,7 +22,9 @@
 
   (setup! [this test])
 
-  (invoke! [_ test op])
+  (invoke! [this test op]
+    (case (:f op)
+      :lrange (car/wcar (:conn this) (car/lrange "foo" 0 -1))))
 
   (teardown! [this test])
 
@@ -38,11 +41,10 @@
           :os              ubuntu/os
           :db              (kiwidb/kiwidb)
           :client          (Client. nil)
-          ; :generator       (->> kclient/lrange
-          ;                       (gen/stagger 1)
-          ;                       (gen/nemesis nil)
-          ;                       (gen/time-limit 15))
-          }))
+          :generator       (->> kclient/lrange
+                                (gen/stagger 1)
+                                (gen/nemesis nil)
+                                (gen/time-limit 15))}))
 
 ; because we are in docker, we need to specify the ssh private key
 ; lein run test --ssh-private-key /root/.ssh/id_rsa -n n1 -n n2 -n n3

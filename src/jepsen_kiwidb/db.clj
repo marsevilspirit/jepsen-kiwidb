@@ -24,7 +24,7 @@
 (def pid-file (str dir "/kiwidb.pid"))
 (def binary "/root/kiwi")
 (def cli-binary "/bin/redis-cli")
-(def config-file "/kiwi.conf")
+(def config-file "kiwi.conf")
 
 (def build-file
   "A file we create to track the last built version; speeds up compilation."
@@ -42,7 +42,7 @@
       (c/cd build-dir
             (log/info "build-dir: entering" build-dir)
             (c/exec :mkdir :-p build-dir)
-            (log/info "mkdir -p" build-dir)
+            (log/info "exec mkdir -p" build-dir)
             (log/info "execing git clone" repo-url dir)
             (c/exec :git :clone repo-url dir)
             (log/info "execed git clone" repo-url dir)))
@@ -66,6 +66,10 @@
 (def build-locks
   "We use these locks to prevent concurrent builds."
   (util/named-locks))
+
+; how to use this macro:
+; https://github.com/taoensso/carmine/wiki/1-Getting-started
+(defmacro wcar* [& body] `(car/wcar my-wcar-opts ~@body))
 
 (defmacro with-build-version
   "Takes a test, a repo name, a version, and a body. Builds the repo by
@@ -95,9 +99,15 @@
       (log/info "Building kiwi" kiwi-version)
       (c/cd dir
             (log/info "execed cd" dir)
-            ; (log/info "execing bash ./etc/script/build.sh --clear") ; every time rebuild
+
+            ; every time clean and then rebuild kiwidb.
+            ; This will consume a lot of time and take up a lot of memory,
+            ; especially when 5 nodes start simultaneously (in docker), which is
+            ; very likely to cause the operating system to run out of memory (OOM).
+            ; (log/info "execing bash ./etc/script/build.sh --clear")
             ; (c/exec :bash "./etc/script/build.sh" :--clear)
             ; (log/info "execed bash ./etc/script/build.sh --clear")
+
             (log/info "execing bash ./etc/script/build.sh")
             (c/exec :bash "./etc/script/build.sh")
             (log/info "execed bash ./etc/script/build.sh"))
@@ -112,8 +122,8 @@
   (doseq [f ["kiwi"]]
     (c/exec :cp (str build-dir "/bin/" f) (str dir "/"))
     (log/info "cp" (str build-dir "/bin/" f) (str dir "/"))
-    (c/exec :cp (str build-dir "/etc/conf/kiwi.conf") (str dir "/"))
-    (log/info "cp" (str build-dir "/etc/conf/kiwi.conf") (str dir "/"))
+    (c/exec :cp (str build-dir "/etc/conf/" config-file) (str dir "/"))
+    (log/info "cp" (str build-dir "/etc/conf/" config-file) (str dir "/"))
     (c/exec :chmod "+x" (str dir "/" f))
     (log/info "chmod +x" (str dir "/" f))))
 
@@ -128,15 +138,15 @@
       (cu/start-daemon!
        {:logfile log-file
         :pidfile pid-file
-        :chdir   dir
-        :args    ["./kiwi.conf"]}
-       binary)
+        :chdir   dir}
+       binary ; ./kiwi
+       config-file) ;config-file is used as: ./kiwi [./kiwi.conf]
       (Thread/sleep 10000))
 
     (teardown! [_ _ node]
       (log/info node "Tearing down kiwidb" kiwi-version)
       (cu/stop-daemon! pid-file)
-      (log/info "Removing kiwi" (str dir "/" "db"))
-      (log/info "Removing kiwi" (str dir "/" "logs"))
+      (log/info "Remove kiwi" (str dir "/" "db"))
       (c/su (c/exec :rm :-rf (str dir "/" "db")))
+      (log/info "Remove kiwi" (str dir "/" "logs"))
       (c/su (c/exec :rm :-rf (str dir "/" "logs"))))))
