@@ -1,6 +1,7 @@
 (ns jepsen-kiwidb.db
   "Database automation"
   (:require [clojure.tools.logging :as log]
+            [clojure.java.io :as io]
             [clojure
              [string :as str]]
             [jepsen
@@ -11,7 +12,8 @@
             [jepsen.control
              [net :as cn]
              [util :as cu]]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [slingshot.slingshot :refer [try+ throw+]])
+  (:import [java.io FileNotFoundException]))
 
 ; for slingshot
 (def e)
@@ -122,7 +124,7 @@
 
 (defn deploy-kiwi!
   "Uploads kiwi binaries built from the given directory."
-  [build-dir, node]
+  [build-dir]
   (log/info "Deploying kiwidb, build-dir:", build-dir)
   (c/exec :mkdir :-p dir)
   (log/info "mkdir -p" dir)
@@ -135,14 +137,15 @@
     (c/exec :chmod "+x" (str dir "/" f))))
 
 (defn cli!
-  "Runs a Redis CLI command. Includes a 2s timeout."
+  "Runs a Redis CLI command. Includes a 3s timeout."
   [& args]
-  (c/su (apply c/exec :timeout "2s" redis-cli args)))
+  (c/su (apply c/exec :timeout "3s" redis-cli args)))
 
 (defn raft-info-str
   "Returns the current cluster state as a string."
   []
-  (cli! :--raw "-p" "9221" "INFO" "RAFT"))
+  (let [str (cli! :--raw "-p" "9221" "INFO" "RAFT")]
+    str))
 
 ; like: raft_node0:addr=172.18.0.7,port=9231
 (defn parse-raft-info-node
@@ -162,24 +165,28 @@
   "Parses a string key and value of the raft info string into a
   key path (for assoc-in) and value [ks v]."
   [k v]
-  (let [k (keyword k)])
-  (case k
-    (:raft_role :raft_state) [[k] (keyword v)]
+  (let [k (keyword k)]
+    (case k
 
-    (:raft_node_id :raft_peer_id :raft_leader_id)
-    [k v]
+      (:raft_role :raft_state)
+      [[k] (keyword v)]
 
-    (if (re-find #"^raft_node(\d+)$" (name k))
-      [[:nodes k] (parse-raft-info-node v)]
-      [k v])
-    [k v]))
+      (:raft_node_id :raft_peer_id :raft_leader_id)
+      [k v]
+
+      :raft_current_term
+      [[k] (util/parse-long v)]
+
+      (if (re-find #"^raft_node(\d+)$" (name k))
+        [[:nodes k] (parse-raft-info-node v)]
+        [k v]))))
 
 ; parse sush as:
 ; raft_group_id:1833cd1f0891fdc16677a6641e2a4f46
 ; raft_node_id:kiwi:172.18.0.7:9231:0:0
 ; raft_peer_id:172.18.0.7:9231:0:0
 ; raft_state:up
-; raft_role:leader
+; raft_role:LEADER
 ; raft_leader_id:172.18.0.7:9231:0:0
 ; raft_current_term:4
 ; raft_node0:addr=172.18.0.7,port=9231
@@ -191,24 +198,28 @@
       (->> (reduce (fn parse-line [[state] line]
                      (cond
                        (re-find #"^\s*$" line) ; A blank line
-                       [state]
+                       ((log/info "blank line:" line)
+                        [state])
 
-                       (re-find #"^(.+?):(.+)$" line) ; A k:v line
-                       (let [[_ k v] (re-find #"^(.+?):(.+)$" line)]
+                       (re-find #"^(.+?):(.*)$" line) ; A k:v line
+                       (let [[_ k v] (re-find #"^(.+?):(.*)$" line)]
+                         (log/info "k:v line:" line)
                          (let [[ks v] (parse-raft-info-kv k v)]
                            [assoc-in state ks v]))
 
                        :else
                        (throw+ {:type :raft-info-parse-error
-                                :line line})))))))
+                                :line line})))
+                   [{}]))))
+
+; return like: {172.18.0.3 n1, 172.18.0.7 n2, 172.18.0.4 n3}
 (def node-ips
   "Returns a map of node names to IP addresses. Memoized."
   (memoize
    (fn node-ips- [test]
      (->> (:nodes test)
           (map (juxt identity cn/ip))
-          (into {}))
-     (log/info "node-ips:" {}))))
+          (into {})))))
 
 (defn node-state
   "
@@ -226,6 +237,9 @@
                              ; other nodes.
                              (try+ (let [ri (raft-info)
                                          r (:raft ri)]
+                                     (log/info "raft-info:" ri)
+                                     (log/info "raft-info(:raft):" r)
+                                     (log/info "ip->node:" ip->node)
                                      ; Other nodes
                                      (->> (:nodes r)
                                           (map (fn xform-node [n]
@@ -236,7 +250,7 @@
                                                  :role (:raft_role r)
                                                  :node node})))
 
-; Couldn't run redis-cli
+                                   ; Couldn't run redis-cli
                                    (catch [:exit 1] e [])
                                    (catch [:exit 255] e [])
                                    (catch [:exit 124] e []))))]
@@ -282,8 +296,7 @@
 
         (log/info node "Setting up kiwidb")
         ; like deploy-kiwi!(build-kiwi!(node))
-        (let [deploy-dir (build-kiwi! test node)] ; TODO: optimize, use -> to simplify
-          (deploy-kiwi! deploy-dir node))
+        (let [_ (-> test (build-kiwi! node) deploy-kiwi!)])
         (log/info node "Starting kiwidb" kiwi-version)
 
         (db/start! this test node)
@@ -291,35 +304,44 @@
         (Thread/sleep 4000)
 
         (if (= node (jepsen/primary test)) ; redis raft.cluster init
+          ; leader do this
           (do (cli! :-p "9221" :-h (str (cn/ip node)) :raft.cluster :init)
               (swap! meta-members assoc node {:state :live})
               (log/info "Main init done, syncing")
-              (jepsen/synchronize test 600))
+              (jepsen/synchronize test 20000))
+
           ; Compilation can be slow and join on secondaries.
+          ; follower do this
           (do (log/info "Waiting for main init")
-              (jepsen/synchronize test 600); Ditto
+              (jepsen/synchronize test 20000); Ditto
               (swap! running inc)
               (Thread/sleep (* 5000 @running))
               (log/info "Joining")
               ; Port is mandatory here
+              (swap! meta-members assoc node {:state :live})
               (log/info "redis-cli -p 9221 -h" (str (cn/ip node)) "raft.cluster join" (str (cn/ip (jepsen/primary test)) ":9221"))
-              (cli! :-p "9221" :-h (str (cn/ip node)) :raft.cluster :join (str (cn/ip (jepsen/primary test)) ":9221"))))
+              (cli! :-p "9221" :-h (str (cn/ip node)) :raft.cluster :join (str (cn/ip (jepsen/primary test)) ":9221"))
+              (log/info node "raft join done");
+              ))
 
-        (Thread/sleep 1000000)
+        ; wait join
+        (Thread/sleep 20000)
         (log/info :meta-members meta-members)
         (log/info :raft-info (raft-info))
         (log/info :node-state (node-state test))
         (log/info node "started kiwidb")) ; wait for starting kiwi server to be ready
 
-      (teardown! [_ _ node]
+      (teardown! [this test node]
         (log/info node "Tearing down kiwidb" kiwi-version)
-        (cu/stop-daemon! pid-file)
+        (db/kill! this test node)
         (log/info "Remove db:" db)
         (c/su (c/exec :rm :-rf db))
         (log/info "Remove logs:" logs)
         (c/su (c/exec :rm :-rf logs))
         (log/info "Remove log-file:" log-file)
-        (c/su (c/exec :rm :-rf log-file)))
+        (c/su (c/exec :rm :-rf log-file))
+        (when (:tcpdump test)
+          (db/teardown! tcpdump test node)))
 
       db/Primary
       (setup-primary! [_ _ _]) ; nothing to do
@@ -330,7 +352,7 @@
       db/Kill
       (start! [_ _ node]
         (c/su
-         (log/info node :starting :redis)
+         (log/info node :starting :kiwi)
          (cu/start-daemon!
           {:logfile log-file
            :pidfile pid-file
@@ -338,6 +360,10 @@
           binary ; ./kiwi
           config-file ; config-file is used as: ./kiwi [./kiwi.conf]
           )))
+
+      (kill! [_ _ _]
+        (c/su
+         (cu/stop-daemon! binary pid-file)))
 
       db/LogFiles
       (log-files [_ _ node]
