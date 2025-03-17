@@ -3,9 +3,21 @@
   (:require [jepsen
              [client :as client]]
             [clojure.tools.logging :as log]
-            [taoensso.carmine
-             [connections :as conn]]
-            [taoensso.carmine :as car :refer [wcar]]))
+            [taoensso.carmine :as car :refer [wcar]]
+            [slingshot.slingshot :refer [try+]]))
+
+(defmacro with-exceptions
+  "Takes an operation, an idempotent :f set, and a body; evaluates body,
+  converting known exceptions to failed ops."
+  [op & body]
+  `(try+ ~@body
+         (catch [:prefix :err] e#
+           (if (re-find #"err" (str e#))
+             (assoc ~op :type :fail, :error (str e#))))
+
+         (catch [:prefix :moved] e#
+           (assoc ~op :type :fail, :error :moved));
+         ))
 
 (defmacro delay-exceptions
   "Adds a short (n second) delay when an exception is thrown from body. Helpful
