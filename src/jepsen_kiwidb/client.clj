@@ -8,9 +8,8 @@
   converting known exceptions to failed ops."
   [op & body]
   `(try+ ~@body
-         (catch [:prefix :err] e#
-           (if (re-find #"err" (str e#))
-             (assoc ~op :type :fail, :error (str e#))))
+         (catch [:prefix :clusterdown] e#
+           (assoc ~op :type :fail, :error :clusterdown))
 
          (catch [:prefix :moved] e#
            (assoc ~op :type :fail, :error :moved));
