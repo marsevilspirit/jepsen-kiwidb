@@ -1,58 +1,46 @@
 (ns jepsen-kiwidb.core
-  (:require [clojure.tools.logging :as log]
-            [jepsen
+  (:require [jepsen
              [checker :as checker]
              [cli :as cli]
              [generator :as gen]
-             [client :as client]
-             [util :as util]
+             [nemesis :as nemesis]
              [tests :as tests]]
             [jepsen-kiwidb
              [db :as kiwidb]
-             [client :as kclient]]
-            [taoensso.carmine :as car]
-            [jepsen.os.ubuntu :as ubuntu]))
-
-(defrecord Client [conn]
-  client/Client
-  (open! [this test node]
-    (kclient/delay-exceptions  5
-                               (log/info "Client opening connection to" node)
-                               (let [c (kclient/open node)]
-                                 (log/info "Client opened connection to" node)
-                                 (assoc this :conn c))))
-
-  (setup! [this test])
-
-  (invoke! [this test op]
-    (kclient/with-exceptions op
-      (case (:f op)
-        :read (assoc op :type :ok,
-                     :value (mapv util/parse-long (car/wcar conn (car/lrange "foo" 0 -1))))
-        :add  (do (car/wcar conn (car/lpush "foo" (:value op)))
-                  (assoc op :type :ok)))))
-
-  (teardown! [this test])
-
-  (close! [_ test]))
+             [client :as kclient]
+             [set :as set]]
+            [jepsen.os.ubuntu :as ubuntu]
+            [jepsen.checker.timeline :as timeline]))
 
 (defn kiwidb-test
   "Given an options map from the command line runner (e.g. :nodes, :ssh,
   :concurrency, ...), constructs a test map."
   [opts]
-  (merge tests/noop-test
-         opts
-         {:pure-generators true
-          :name            "kiwidb"
-          :os              ubuntu/os
-          :db              (kiwidb/kiwidb)
-          :client          (Client. nil)
-          :checker         (checker/set)
-          :generator       (->> (gen/mix [kclient/lrange kclient/lpush])
-                                (gen/stagger 1/50) ; The time interval for each operation.
-                                (gen/nemesis nil)
-                                (gen/time-limit 15) ; The time limit for the test.
-                                )}))
+  (let [workload (set/workload)]
+    (merge tests/noop-test
+           opts
+           {:pure-generators true
+            :name            "kiwidb"
+            :os              ubuntu/os
+            :db              (kiwidb/kiwidb)
+            :client          (:client workload)
+            :nemesis         (nemesis/partition-random-halves)
+            :checker         (checker/compose
+                              {:perf (checker/perf)
+                               :clock (checker/clock-plot)
+                               :timeline (timeline/html)
+                               :stats (checker/stats)
+                               :exceptions (checker/unhandled-exceptions)
+                               :workload (:checker workload)})
+            :generator       (->> (gen/mix [kclient/lrange kclient/lpush])
+                                  (gen/stagger 1/10) ; The time interval for each operation.
+                                  (gen/nemesis
+                                   (cycle [(gen/sleep 5)
+                                           {:type :info, :f :start}
+                                           (gen/sleep 5)
+                                           {:type :info, :f :stop}]))
+                                  (gen/time-limit 30) ; The time limit for the test.
+                                  )})))
 
 ; because we are in docker, we need to specify the ssh private key.
 ; lein run test --ssh-private-key /root/.ssh/id_rsa -n n1 -n n2 -n n3

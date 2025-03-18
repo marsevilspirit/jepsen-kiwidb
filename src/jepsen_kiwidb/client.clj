@@ -1,9 +1,6 @@
 (ns jepsen-kiwidb.client
   "Helper functions for working with Carmine, out kiwi client."
-  (:require [jepsen
-             [client :as client]]
-            [clojure.tools.logging :as log]
-            [taoensso.carmine :as car :refer [wcar]]
+  (:require [taoensso.carmine :as car]
             [slingshot.slingshot :refer [try+]]))
 
 (defmacro with-exceptions

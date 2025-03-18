@@ -29,7 +29,6 @@
 (def log-file (str dir "/kiwidb.log")) ; /root/kiwidb.log
 (def pid-file (str dir "/kiwidb.pid")) ; /root/kiwidb.pid
 (def binary "/root/kiwi")
-; (def cli-binary "/bin/redis-cli")
 (def redis-cli "redis-cli")
 (def config-file "kiwi.conf")
 
@@ -38,7 +37,7 @@
   "jepsen-built-version")
 
 (def kiwi-repo-url "https://github.com/marsevilspirit/kiwi")
-(def kiwi-version "fix-errcode-moved")
+(def kiwi-version "unstable")
 
 (defn checkout-repo!
   "Checks out a repo at the given version into a directory in build/ named
@@ -56,7 +55,8 @@
 
     (c/cd full-dir
           (log/info "full-dir: entering" full-dir)
-          (try+ (c/exec :git :checkout version)
+          (try+ (do (c/exec :git :checkout version)
+                    (log/info "execed git checkout" version))
                 (catch [:exit 1] e
                   (if (re-find #"pathspec .+ did not match any file" (:err e))
                     (do ; Ah, we're out of date
@@ -118,7 +118,7 @@
             (log/info "execing bash ./etc/script/build.sh")
             (c/exec :bash "./etc/script/build.sh")
             (log/info "execed bash ./etc/script/build.sh"))
-      [dir])))
+      dir)))
 
 (defn deploy-kiwi!
   "Uploads kiwi binaries built from the given directory."
