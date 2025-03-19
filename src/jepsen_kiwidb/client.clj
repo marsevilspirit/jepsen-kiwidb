@@ -42,6 +42,3 @@
                      opts)
          wcar-opts {:pool client-conn-pool, :spec spec}]
      wcar-opts)))
-
-(defn lrange [_ _] {:type :invoke, :f :read, :value nil})
-(defn lpush  [_ _] {:type :invoke, :f :add, :value (rand-int 5)})

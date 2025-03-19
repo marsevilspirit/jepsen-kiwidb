@@ -7,7 +7,6 @@
              [tests :as tests]]
             [jepsen-kiwidb
              [db :as kiwidb]
-             [client :as kclient]
              [set :as set]]
             [jepsen.os.ubuntu :as ubuntu]
             [jepsen.checker.timeline :as timeline]))
@@ -32,8 +31,8 @@
                                :stats (checker/stats)
                                :exceptions (checker/unhandled-exceptions)
                                :workload (:checker workload)})
-            :generator       (->> (gen/mix [kclient/lrange kclient/lpush])
-                                  (gen/stagger 1/10) ; The time interval for each operation.
+            :generator       (->> (:generator workload)
+                                  (gen/stagger 1/50) ; The time interval for each operation.
                                   (gen/nemesis
                                    (cycle [(gen/sleep 5)
                                            {:type :info, :f :start}

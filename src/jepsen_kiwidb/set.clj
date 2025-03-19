@@ -23,18 +23,23 @@
   (invoke! [_ _ op]
     (kclient/with-exceptions op
       (case (:f op)
-        :read (assoc op :type :ok,
-                     :value (mapv util/parse-long (car/wcar conn (car/lrange "foo" 0 -1))))
-        :add  (do (car/wcar conn (car/lpush "foo" (:value op)))
+        :read (let [value
+                    (mapv util/parse-long (car/wcar conn (car/lrange "set-jepsen-test" 0 -1)))]
+                (assoc op :type :ok, :value value))
+        :add  (do (car/wcar conn (car/lpush "set-jepsen-test" (:value op)))
                   (assoc op :type :ok)))))
 
   (teardown! [_ _])
 
   (close! [_ _]))
 
+(defn lrange [] {:type :invoke, :f :read, :value nil})
+
+(defn lpush [] {:type :invoke, :f :add, :value (rand-int 5)})
+
 (defn workload
   "set workload by lpush and lrange"
   []
   {:client (SetClient. nil)
-   :checker (checker/set)
-   :generator (gen/mix [kclient/lrange kclient/lpush])})
+   :checker (checker/set-full)
+   :generator (gen/mix [lrange lpush])})
