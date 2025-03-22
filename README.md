@@ -33,4 +33,5 @@ docker exec [control] /bin/bash
 
 cd jepsen-kiwidb
 
-lein run test --ssh-private-key /root/.ssh/id_rsa -n n1 -n n2 -n n3 --concurrency 100
+只启动三个节点
+lein run test --ssh-private-key /root/.ssh/id_rsa -n n1 -n n2 -n n3
